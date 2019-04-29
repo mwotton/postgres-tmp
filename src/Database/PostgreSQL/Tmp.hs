@@ -2,7 +2,7 @@
 
 The main usecase for this are tests where you don’t want to assume that a certain database exists.
 -}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Database.PostgreSQL.Tmp
   ( defaultDB
@@ -18,13 +18,15 @@ module Database.PostgreSQL.Tmp
   , dropDB
   ) where
 
-import           Control.Applicative (pure)
+import           Control.Applicative              (pure)
 import           Control.Exception
-import           Data.ByteString (ByteString)
+import           Data.ByteString                  (ByteString)
 import           Data.Coerce
 import           Data.Int
 import           Data.Monoid
-import qualified Data.Text as T
+import qualified Data.Text                        as T
+import qualified Data.UUID                        as UUID
+import qualified Data.UUID.V4                     as UUID
 import           Database.PostgreSQL.Simple
 import           Database.PostgreSQL.Simple.Types
 
@@ -35,8 +37,9 @@ defaultDB = "dbname='postgres' user='postgres'"
 
 -- | The data necessary to connect to the temporary database
 data DBInfo =
-  DBInfo {dbName :: T.Text
-         ,roleName :: T.Text} deriving (Show,Read,Eq,Ord)
+  DBInfo {dbName   :: T.Text
+         ,roleName :: T.Text
+         ,password :: T.Text} deriving (Show,Read,Eq,Ord)
 
 -- | Convenience wrapper for 'withTmpDB'' using 'defaultDB'
 withTmpDB :: (DBInfo -> IO a) -> IO a
@@ -64,13 +67,13 @@ withTmpDB' conStr f = bracket (createTmpDB conStr) dropTmpDB (\(_,dbInfo) -> f d
 createTmpDB :: ByteString -> IO (Connection, DBInfo)
 createTmpDB conStr = do
   conn <- connectPostgreSQL conStr
-  role <- newRole conn
+  (role,pw) <- newRole conn
   db <- newDB conn role
-  pure (conn, DBInfo {dbName = db,roleName = role})
+  pure (conn, DBInfo {dbName = db,roleName = role, password = pw})
 
 -- | Destroy the database and the role created by `createTmpDB`.
 dropTmpDB :: (Connection, DBInfo) -> IO ()
-dropTmpDB (conn, DBInfo db role) = do
+dropTmpDB (conn, DBInfo db role _) = do
   _ <- dropDB conn db
   _ <- dropRole conn role
   close conn
@@ -80,12 +83,13 @@ dropTmpDB (conn, DBInfo db role) = do
 -- The new role does not have a password and has the @CREATEDB@
 -- privilege. The database that the connection points to is assumed to
 -- contain a table called @pg_roles@ with a @rolname@ column.
-newRole :: Connection -> IO T.Text
+newRole :: Connection -> IO (T.Text,T.Text)
 newRole conn =
   do (roles :: [Only T.Text]) <- query_ conn "SELECT rolname FROM pg_roles"
      let newName = freshName "tmp" (coerce roles)
-     _ <- execute conn "CREATE USER ? WITH CREATEDB" (Only (Identifier newName))
-     pure newName
+     pw <- UUID.toText <$> UUID.nextRandom
+     _ <- execute conn "CREATE USER ? PASSWORD ? WITH CREATEDB" (Identifier newName, pw)
+     pure (newName, pw)
 
 -- | Drop the role.
 dropRole :: Connection -> T.Text -> IO Int64
