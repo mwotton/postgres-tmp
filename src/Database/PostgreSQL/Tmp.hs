@@ -88,7 +88,7 @@ newRole conn =
   do (roles :: [Only T.Text]) <- query_ conn "SELECT rolname FROM pg_roles"
      let newName = freshName "tmp" (coerce roles)
      pw <- UUID.toText <$> UUID.nextRandom
-     _ <- execute conn "CREATE USER ? PASSWORD ? WITH CREATEDB" (Identifier newName, pw)
+     _ <- execute conn "CREATE USER ? WITH PASSWORD ? CREATEDB" (Identifier newName, pw)
      pure (newName, pw)
 
 -- | Drop the role.
